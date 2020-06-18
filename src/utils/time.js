@@ -1,11 +1,5 @@
 import moment from 'moment'
 
-export function getNextTimeSlot(lastclosetime, interval) {
-    let startTime = lastclosetime + 1
-    let endTime = lastclosetime + intervaltoMs(interval)
-    return { startTime, endTime }
-}
-
 export function intervaltoMs(interval) {
     switch (interval) {
         case '1m':

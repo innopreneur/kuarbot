@@ -5,14 +5,19 @@ import { logger } from './utils/logger'
 import { readableBalance, getGasPrice } from './utils/web3'
 import { sendMessage } from './utils/notifier'
 import { sleep } from './utils/wait'
+require('dotenv').config()
 
-let OCEAN = "0x985dd3d42de1e256d09e1c10f112bccb8015ad41"
-let WETH = "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2"
+let baseTokenSymbol = process.env.BaseTokenSymbol
+let quoteTokenSymbol = process.env.QuoteTokenSymbol
+let baseToken = process.env.BaseTokenAddress
+let quoteToken = process.env.QuoteTokenAddress
 let kFees = kucoin.tradingFee()
 let uFees = uniswap.tradingFee()
 let gasLimit = 200000
-let OCEANTakeProfitAmt = 150
-let WETHTakeProfitAmt = 0.05
+let OCEANTakeProfitAmt = Number(process.env.BaseTokenTakeProfitAmt)
+let WETHTakeProfitAmt = Number(process.env.QuoteTokenTakeProfitAmt)
+let kucoinPair = process.env.kucoinPair
+let maxBaseToken = Number(process.env.maxBaseTokenAmt)
 
 //start trading
 export async function startLoop() {
@@ -24,12 +29,15 @@ export async function startLoop() {
             await doBuyFirst()
             await sleep(4)
         } catch (err) {
+            if (!err.message.includes("failed to meet quorum")) {
+                await sendMessage(`
+                xxxxx ERROR xxxxxx
+                [KU-ARBOT]
+                ${err.message}
+                `)
+            }
             console.error(err)
-            await sendMessage(`
-            xxxxx ERROR xxxxxx
-            [KU-ARBOT]
-            ${err.message}
-            `)
+
         }
     }
 
@@ -41,37 +49,38 @@ function calculateProfit(cost, income) {
 
 async function doSellFirst() {
     //SELL first 
-    let { price, size } = await kucoin.getBestDeal('OCEAN-ETH', 'sell')
-    logger.info(`O-E (sell) -> Raw Kucoin cost - ${size}`)
-    let OCEANIn = size
-    let WETHIn = ((price * size) - (price * size * kFees)).toString()
+    let { bids } = await kucoin.getOrderbook(kucoinPair)
+    let price = getAveragePrice(maxBaseToken, bids)
+    logger.info(`${baseTokenSymbol}-${quoteTokenSymbol} (sell) -> Raw Kucoin cost - ${maxBaseToken}`)
+    let baseIn = maxBaseToken
+    let quoteIn = ((price * maxBaseToken) - (price * maxBaseToken * kFees)).toString()
     //check price on Uniswap
-    let OCEANOut = await uniswap.getBestSwap(OCEAN, WETH, WETH, WETHIn)
-    logger.info(`E-O (swap) -> Raw Uniswap income OCEAN - ${OCEANOut}`)
+    let baseOut = await uniswap.getBestSwap(baseToken, quoteToken, quoteToken, quoteIn)
+    logger.info(`${quoteTokenSymbol}-${baseTokenSymbol} (swap) -> Raw Uniswap income ${baseTokenSymbol} - ${baseOut}`)
     let gasPrice = await getGasPrice("FASTEST")
     let txFees = readableBalance(gasPrice * gasLimit) / price
-    let profit = calculateProfit(OCEANIn, OCEANOut - (OCEANOut * uFees) - txFees)
+    let profit = calculateProfit(baseIn, baseOut - (baseOut * uFees) - txFees)
     console.log("------------------------------")
-    console.log(`Profit in OCEANs : ${profit}`)
+    console.log(`Profit in ${baseTokenSymbol} : ${profit}`)
     console.log("------------------------------")
     if (profit > OCEANTakeProfitAmt) {
-        console.log("TRADE FOR OCEAN------------------")
-        //swap WETH for OCEAN in Uniswap
-        //await uniswap.swap(WETH, OCEAN, WETHIn, OCEANOut, "WETH", process.env.FROM)
+        console.log(`TRADE FOR ${baseTokenSymbol}------------------`)
+        //swap quote for base in Uniswap
+        //await uniswap.swap(quoteToken, baseToken, quoteIn, baseOut, quoteTokenSymbol, process.env.FROM)
 
 
         //TODO check if Order is fulfilled
 
 
-        //sell OCEAN on Kucoin
-        ///await kucoin.placeOrder('OCEAN-ETH', 'sell', size, price, "limit")
+        //sell base on Kucoin
+        ///await kucoin.placeOrder(kucoinPair, 'sell', maxBaseToken, price, "limit")
         //notify
         await sendMessage(`
         --- KU-ARBOT ------
-        Sold ${size} OCEAN in Kucoin
-        Got ${OCEANOut} OCEAN from Uniswap
+        Sold ${maxBaseToken} ${baseTokenSymbol} in Kucoin
+        Got ${baseOut} ${baseTokenSymbol} from Uniswap
         -------------------
-        Profit = ${profit} OCEAN
+        Profit = ${profit} ${baseTokenSymbol}
         -------------------
         `)
 
@@ -81,41 +90,52 @@ async function doSellFirst() {
 
 async function doBuyFirst() {
     //BUY first 
-    let { price, size } = await kucoin.getBestDeal('OCEAN-ETH', 'buy')
-    logger.info(`O-E (buy) -> Raw Kucoin cost - ${size}`)
-    let WETHIn = price * size
-    let OCEANIn = size - (size * kFees)
+    let { asks } = await kucoin.getOrderbook(kucoinPair)
+    let price = getAveragePrice(maxBaseToken, asks)
+    logger.info(`${quoteTokenSymbol}-${baseTokenSymbol} (buy) -> Raw Kucoin cost - ${maxBaseToken}`)
+    let quoteIn = price * maxBaseToken
+    let baseIn = maxBaseToken - (maxBaseToken * kFees)
     //check price on Uniswap
-    let WETHOut = await uniswap.getBestSwap(OCEAN, WETH, OCEAN, OCEANIn)
-    logger.info(`O-E (swap) -> Raw Uniswap income ETH - ${WETHOut}`)
+    let quoteOut = await uniswap.getBestSwap(baseToken, quoteToken, baseToken, baseIn)
+    logger.info(`${baseTokenSymbol}-${quoteTokenSymbol} (swap) -> Raw Uniswap income ${quoteTokenSymbol} - ${quoteOut}`)
     let gasPrice = await getGasPrice("FASTEST")
     let txFees = readableBalance(gasPrice * gasLimit)
-    let profit = calculateProfit(WETHIn, WETHOut - (WETHOut * uFees) - txFees)
+    let profit = calculateProfit(quoteIn, quoteOut - (quoteOut * uFees) - txFees)
     console.log("------------------------------")
-    console.log(`Profit in ETH :  ${profit}`)
+    console.log(`Profit in ${quoteTokenSymbol} :  ${profit}`)
     console.log("------------------------------")
     if (profit > WETHTakeProfitAmt) {
-        console.log("TRADE FOR WETH------------------")
-        //swap OCEAN for WETH in Uniswap
-        //await uniswap.swap(OCEAN, WETH, OCEANIn, WETHOut, "OCEAN", process.env.FROM)
+        console.log(`TRADE FOR ${quoteTokenSymbol} ------------------`)
+        //swap base for quote in Uniswap
+        //await uniswap.swap(baseToken, quoteToken, baseIn, quoteOut, baseTokenSymbol, process.env.FROM)
 
 
         //TODO check if Order is fulfilled
 
 
 
-        //sell OCEAN on Kucoin
-        //await kucoin.placeOrder('OCEAN-ETH', 'sell', size, price, "limit")
+        //sell baseToken on Kucoin
+        //await kucoin.placeOrder(kucoinPair, 'sell', maxBaseToken, price, "limit")
         //notify
         await sendMessage(`
         --- KU-ARBOT ------
-        Sold ${WETHIn} ETH in Kucoin
-        Got ${WETHOut} WETH from Uniswap
+        Sold ${quoteIn} ${quoteTokenSymbol} in Kucoin
+        Got ${quoteOut} ${quoteTokenSymbol} from Uniswap
         -------------------
-        Profit = ${profit} ETH
+        Profit = ${profit} ${quoteTokenSymbol}
         -------------------
         `)
     }
+}
+
+function getAveragePrice(expected, orders) {
+    let i = 0, size = 0, price = 0
+    while (i < orders.length && size <= expected) {
+        size += Number(orders[i][1])
+        price += Number(orders[i][0])
+        i++
+    }
+    return (price / i)
 }
 
 startLoop()

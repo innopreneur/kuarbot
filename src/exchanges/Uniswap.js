@@ -59,7 +59,7 @@ class Uniswap {
         logger.info(`Quote Reserve - ", ${pair.reserve1.toSignificant(10)}`)
         let slippage = t.slippage.toSignificant(4)
         let op = t.outputAmount.toSignificant(7)
-        return op - (op * 0.01 * slippage)
+        return op
 
     }
 
