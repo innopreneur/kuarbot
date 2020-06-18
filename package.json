@@ -33,6 +33,7 @@
     "moment": "^2.25.3",
     "source-map-support": "^0.5.16",
     "web3": "^1.2.6",
-    "winston": "^3.2.1"
+    "winston": "^3.2.1",
+    "winston-daily-rotate-file": "^4.5.0"
   }
 }
